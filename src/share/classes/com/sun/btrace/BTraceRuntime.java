@@ -45,6 +45,7 @@ import com.sun.management.HotSpotDiagnosticMXBean;
 import com.sun.btrace.aggregation.Aggregation;
 import com.sun.btrace.aggregation.AggregationKey;
 import com.sun.btrace.aggregation.AggregationFunction;
+import com.sun.btrace.annotations.MethodRef;
 import com.sun.btrace.annotations.OnError;
 import com.sun.btrace.annotations.OnExit;
 import com.sun.btrace.annotations.OnTimer;
@@ -63,6 +64,7 @@ import com.sun.btrace.comm.StringMapDataCommand;
 import com.sun.btrace.comm.GridDataCommand;
 import com.sun.btrace.profiling.MethodInvocationProfiler;
 import com.sun.btrace.runtime.Constants;
+import com.sun.btrace.runtime.Instrumentor;
 
 import java.lang.management.GarbageCollectorMXBean;
 
@@ -76,6 +78,10 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.ObjectOutputStream;
+import java.lang.annotation.Annotation;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.lang.management.LockInfo;
 import java.lang.management.MemoryMXBean;
 import java.lang.management.MemoryNotificationInfo;
@@ -109,10 +115,15 @@ import javax.management.ObjectName;
 import javax.management.openmbean.CompositeData;
 
 import java.lang.management.OperatingSystemMXBean;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Proxy;
+import java.lang.reflect.Type;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentMap;
 
 import sun.misc.Perf;
 import sun.misc.Unsafe;
@@ -187,8 +198,6 @@ public final class BTraceRuntime  {
         } catch (NoSuchMethodException | SecurityException ex) {
             // ignore
         }
-        // ignore
-
 
         dummy = new BTraceRuntime();
         LINE_SEPARATOR = System.getProperty("line.separator");
@@ -401,6 +410,11 @@ public final class BTraceRuntime  {
         });
         cmdThread.setDaemon(true);
         cmdThread.start();
+    }
+
+    public static String getInjectedMethodName(String btraceClassName, String name) {
+        return Constants.BTRACE_METHOD_PREFIX +
+               btraceClassName.replace('/', '$').replace(".", "$") + "$" + name;
     }
 
     public static void initUnsafe() {
@@ -1848,6 +1862,10 @@ public final class BTraceRuntime  {
         profiler.reset();
     }
 
+    static <T> T proxy(Class<? super T> type, final Class<?> owner, final T instance, final String dispatch) {
+        return getCurrent().makeProxy(type, owner, instance, dispatch);
+    }
+
     // private methods below this point
     // raise DTrace USDT probe
     private static native int dtraceProbe0(String s1, String s2, int i1, int i2);
@@ -2449,7 +2467,157 @@ public final class BTraceRuntime  {
         }
     }
 
+    private <T> T makeProxy(final Class<? super T> type, final Class<?> owner, final T instance, final String dispatch) {
+        final Map<String, String> dispatchMap = new HashMap<>();
+        for(String kv : dispatch.split(",")) {
+            String[] mn = kv.split("=");
+            String mName = getInjectedMethodName(className, mn[1]);
+            dispatchMap.put(mn[0], mName);
+        }
+        Class<?> clz = instance.getClass();
+        Class[] interfaces;
+        if (clz.isInterface()) {
+            interfaces = new Class[]{clz};
+        } else {
+            interfaces = clz.getInterfaces();
+        }
+        return (T)Proxy.newProxyInstance(
+            instance.getClass().getClassLoader(),
+            interfaces,
+            new ProxyInvocationHandler<>(type, owner, dispatchMap, instance)
+        );
+    }
+
     private static void debugPrint(String msg) {
         System.out.println("btrace DEBUG: " + msg);
+    }
+
+    private static class ProxyInvocationHandler<T> implements InvocationHandler {
+        private class MRef {
+            private final Method method;
+            private final int selfIdx, retIdx;
+
+            public MRef(Method method, int selfIdx, int retIdx) {
+                System.err.println("*** new methodref: " + method);
+                if (method != null) System.err.println("*** -> " + method.isAnnotationPresent(MethodRef.class));
+                this.selfIdx = selfIdx;
+                this.retIdx = retIdx;
+                this.method = (method != null && method.isAnnotationPresent(MethodRef.class)) ?
+                                method : null;
+                if (this.method != null) {
+                    this.method.setAccessible(true);
+                }
+            }
+
+            public void invoke(T self, Object ret, Object ... args) {
+                if (method == null) return;
+
+                Class[] mParamTypes = method.getParameterTypes();
+                Object[] iArgs = new Object[mParamTypes.length];
+                int j = 0;
+                for(int i = 0; i < mParamTypes.length; i++) {
+                    if (i == selfIdx) {
+                        iArgs[i] = self;
+                    } else if (i == retIdx) {
+                        iArgs[i] = ret;
+                    } else {
+                        iArgs[i] = args[j++];
+                    }
+                }
+
+                try {
+                    System.err.println("*** invoking " + method);
+                    System.err.println("*** args: " + Arrays.deepToString(iArgs));
+                    this.method.invoke(null, iArgs);
+                } catch (Throwable t) {
+                    t.printStackTrace();
+                    BTraceRuntime.handleException(t);
+                }
+            }
+        }
+
+        private final Map<String, String> dispatchMap;
+        private final ConcurrentMap<Method, MRef> methodMap;
+        private final T instance;
+        private final Class<? super T> type;
+        private final Class<?> owner;
+
+        public ProxyInvocationHandler(Class<? super T> type, Class<?> owner, Map<String, String> dispatchMap, T instance) {
+            this.dispatchMap = dispatchMap;
+            this.instance = instance;
+            this.type = type;
+            this.owner = owner;
+            this.methodMap = new ConcurrentHashMap<>();
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+            String mName = method.getName();
+            MRef mMethodRef = methodMap.get(method);
+            if (mMethodRef == null) {
+                String tName = dispatchMap.get(mName);
+                if (tName != null) {
+                    mMethodRef = findMethodRef(owner, tName, method.getParameterTypes());
+                } else {
+                    mMethodRef = new MRef(null, -1, -1);
+                }
+                if (mMethodRef != null) {
+                    MRef prev = methodMap.putIfAbsent(method, mMethodRef);
+                    mMethodRef = prev != null ? prev : mMethodRef;
+                }
+            }
+            if (mMethodRef != null && mMethodRef.retIdx == -1) {
+                mMethodRef.invoke(instance, null, args);
+            }
+            Object ret = method.invoke(instance, args);
+            if (mMethodRef != null && mMethodRef.retIdx > -1) {
+                mMethodRef.invoke(instance, ret, args);
+            }
+            return ret;
+        }
+
+        private MRef findMethodRef(Class<?> owner, String name, Class[] paramTypes) {
+            for(Method m : owner.getDeclaredMethods()) {
+                System.err.println("*** checking " + m);
+                if (m.getName().equals(name)) {
+                    Class[] refTypes = m.getParameterTypes();
+                    if (refTypes.length == 1 && refTypes[0].equals(owner)) {
+                        return new MRef(m, -1 , -1);
+                    }
+                    if (Arrays.equals(paramTypes, refTypes)) {
+                        return new MRef(m, -1, -1);
+                    }
+
+                    int selfIdx = -1;
+                    int retIdx = -1;
+                    List<Class> cRefTypes = new ArrayList<>(paramTypes.length);
+                    Annotation[][] paramAnnots = m.getParameterAnnotations();
+                    out:
+                    for(int i = 0; i < refTypes.length; i++) {
+                        for(Annotation a : paramAnnots[i]) {
+                            Class<? extends Annotation> aType = a.annotationType();
+                            if (aType.equals(Self.class)) {
+                                System.err.println("*** self = " + i);
+                                selfIdx = i;
+                                continue out;
+                            } else if (aType.equals(Return.class)) {
+                                System.err.println("*** ret = " + i);
+                                retIdx = i;
+                                continue out;
+                            }
+                        }
+                        cRefTypes.add(refTypes[i]);
+                    }
+                    Class[] cParamTypes = cRefTypes.toArray(new Class[cRefTypes.size()]);
+                    System.err.println("*** paramTypes = " + Arrays.deepToString(paramTypes));
+                    System.err.println("*** cParamTypes = " + Arrays.deepToString(cParamTypes));
+                    System.err.println("*** == " + Arrays.equals(paramTypes, cParamTypes));
+                    if (Arrays.equals(paramTypes, cParamTypes)) {
+                        return new MRef(m, selfIdx, retIdx);
+                    }
+                }
+            }
+            return new MRef(null, -1, -1);
+        }
     }
 }

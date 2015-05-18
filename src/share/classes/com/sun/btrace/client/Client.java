@@ -222,7 +222,7 @@ public class Client {
      * Loads BTrace agent on the target process if not loaded
      * already.
      */
-    public void attach(String pid) throws IOException {
+    public void attach(String pid, String sysCp, String bootCp) throws IOException {
         try {
             String agentPath = "/btrace-agent.jar";
             String tmp = Client.class.getClassLoader().getResource("com/sun/btrace").toString();
@@ -230,7 +230,7 @@ public class Client {
             tmp = tmp.substring("jar:".length(), tmp.lastIndexOf("/"));
             agentPath = tmp + agentPath;
             agentPath = new File(new URI(agentPath)).getAbsolutePath();
-            attach(pid, agentPath, null, null);
+            attach(pid, agentPath, sysCp, bootCp);
         } catch (RuntimeException re) {
             throw re;
         } catch (IOException ioexp) {

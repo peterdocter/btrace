@@ -38,6 +38,7 @@ import com.sun.source.util.TreeScanner;
 import com.sun.btrace.annotations.BTrace;
 import com.sun.btrace.annotations.Injected;
 import com.sun.btrace.annotations.Kind;
+import com.sun.btrace.annotations.MethodRef;
 import com.sun.btrace.annotations.OnMethod;
 import com.sun.btrace.annotations.Sampled;
 import com.sun.btrace.util.Messages;
@@ -50,9 +51,9 @@ import java.util.EnumSet;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
 import javax.lang.model.element.ExecutableElement;
-import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.VariableElement;
 import javax.lang.model.type.TypeMirror;
+import javax.lang.model.util.Types;
 
 /**
  * This class tree visitor validates a BTrace program's ClassTree.
@@ -63,6 +64,7 @@ public class VerifierVisitor extends TreeScanner<Boolean, Void> {
     private final Verifier verifier;
     private String className;
     private boolean insideMethod;
+    // the following volatiles are for the sake of double-checked-locking
     private volatile static Method[] btraceMethods;
     private volatile static Class[] btraceClasses;
     private volatile static ExecutableElement[] sharedMethods;
@@ -72,6 +74,7 @@ public class VerifierVisitor extends TreeScanner<Boolean, Void> {
     private TypeMirror runtimeServiceTm = null;
     private TypeMirror simpleServiceTm = null;
     private TypeMirror serviceInjectorTm = null;
+    private boolean allowClassLiteral = false;
 
     public VerifierVisitor(Verifier verifier, Element clzElement) {
         this.verifier = verifier;
@@ -119,6 +122,9 @@ public class VerifierVisitor extends TreeScanner<Boolean, Void> {
             if (name.equals("super") ||
                 isBTraceMethod(name, numArgs) ||
                 isSharedMethod(name, numArgs)) {
+                if (name.equals("proxy")) {
+                    allowClassLiteral = true;
+                }
                 return super.visitMethodInvocation(node, v);
             } // else fall through ..
         } else if (methodSelect.getKind() == Tree.Kind.MEMBER_SELECT) {
@@ -141,6 +147,10 @@ public class VerifierVisitor extends TreeScanner<Boolean, Void> {
                     numArgs = args.size();
                 }
                 if (isBTraceMethod(name, numArgs)) {
+                    verifier.getMessager().printMessage(Diagnostic.Kind.NOTE, "*** name = " + name);
+                    if (name.equals("proxy")) {
+                        allowClassLiteral = true;
+                    }
                     return super.visitMethodInvocation(node, v);
                 } // else fall through..
             } // else fall through..
@@ -318,6 +328,13 @@ public class VerifierVisitor extends TreeScanner<Boolean, Void> {
                         } else {
                             // force the "public" modifier only on the annotated methods
                             if (isAnnotated(node)) {
+                                Element e = getElement(node);
+                                if (e.getKind() == ElementKind.METHOD) {
+                                    if (((ExecutableElement)e).getAnnotation(MethodRef.class) != null) {
+                                        // @MethodRef annotated methods may be private
+                                        return super.visitMethod(node, v);
+                                    }
+                                }
                                 return reportError("method.should.be.public", node);
                             }
                             return super.visitMethod(node, v);
@@ -353,6 +370,14 @@ public class VerifierVisitor extends TreeScanner<Boolean, Void> {
                 Tree leaf = tp.getLeaf();
                 if (leaf.getKind() == Tree.Kind.METHOD) {
                     if (isAnnotated((MethodTree)leaf)) {
+                        Element e = getElement(leaf);
+                        if (e.getKind() == ElementKind.METHOD) {
+                            OnMethod om = ((ExecutableElement)e).getAnnotation(OnMethod.class);
+                            if (om.location().value() == Kind.RETURN) {
+                                // RETURN handlers may return a value
+                                return super.visitReturn(node, v);
+                            }
+                        }
                         return reportError("return.type.should.be.void", node);
                     } else {
                         return super.visitReturn(node, v);
@@ -367,9 +392,13 @@ public class VerifierVisitor extends TreeScanner<Boolean, Void> {
     public Boolean visitMemberSelect(MemberSelectTree node, Void v) {
         if (node.getIdentifier().contentEquals("class")) {
             TypeMirror tm = getType(node.getExpression());
-            if (!verifier.getTypeUtils().isSubtype(tm, btraceServiceTm)) {
+            Types tu = verifier.getTypeUtils();
+            verifier.getMessager().printMessage(Diagnostic.Kind.NOTE, "*** tm = " + tm.toString());
+            if (!allowClassLiteral &&
+                !tu.isSubtype(tm, btraceServiceTm)) {
                 return reportError("no.class.literals", node);
             }
+            allowClassLiteral = false;
         }
         return super.visitMemberSelect(node, v);
     }

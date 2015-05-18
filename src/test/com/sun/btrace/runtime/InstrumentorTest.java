@@ -435,6 +435,57 @@ public class InstrumentorTest extends InstrumentorTestBase {
     }
 
     @Test
+    public void methodEntryArgsReturnProxy() throws Exception {
+        loadTargetClass("OnMethodTest");
+        transform("onmethod/ArgsReturnProxy");
+        checkTransformation(
+            "ASTORE 2\n" +
+            "ALOAD 2\n" +
+            "ALOAD 1\n" +
+            "INVOKESTATIC resources/OnMethodTest.$btrace$traces$onmethod$ArgsReturnProxy$args (Ljava/util/Iterator;Ljava/lang/String;)Ljava/util/Iterator;\n" +
+            "MAXLOCALS = 3\n" +
+            "\n" +
+            "// access flags 0xA\n" +
+            "private static $btrace$traces$onmethod$ArgsReturnProxy$args(Ljava/util/Iterator;Ljava/lang/String;)Ljava/util/Iterator;\n" +
+            "@Lcom/sun/btrace/annotations/OnMethod;(clazz=\"/.*\\\\.OnMethodTest/\", method=\"returnWrapper\", location=@Lcom/sun/btrace/annotations/Location;(value=Lcom/sun/btrace/annotations/Kind;.RETURN))\n" +
+            "@Lcom/sun/btrace/annotations/Return;() // parameter 0\n" +
+            "TRYCATCHBLOCK L0 L1 L1 java/lang/Throwable\n" +
+            "GETSTATIC traces/onmethod/ArgsReturnProxy.runtime : Lcom/sun/btrace/BTraceRuntime;\n" +
+            "INVOKESTATIC com/sun/btrace/BTraceRuntime.enter (Lcom/sun/btrace/BTraceRuntime;)Z\n" +
+            "IFNE L0\n" +
+            "ALOAD 0\n" +
+            "ARETURN\n" +
+            "L0\n" +
+            "LDC \"args\"\n" +
+            "INVOKESTATIC com/sun/btrace/BTraceUtils.println (Ljava/lang/Object;)V\n" +
+            "ALOAD 0\n" +
+            "LDC \"next=next\"\n" +
+            "LDC Ljava/util/Iterator;.class\n" +
+            "INVOKESTATIC com/sun/btrace/BTraceUtils.proxy (Ljava/lang/Object;Ljava/lang/String;Ljava/lang/Class;)Ljava/lang/Object;\n" +
+            "CHECKCAST java/util/Iterator\n" +
+            "INVOKESTATIC com/sun/btrace/BTraceRuntime.leave ()V\n" +
+            "ARETURN\n" +
+            "L1\n" +
+            "INVOKESTATIC com/sun/btrace/BTraceRuntime.handleException (Ljava/lang/Throwable;)V\n" +
+            "ALOAD 0\n" +
+            "INVOKESTATIC com/sun/btrace/BTraceRuntime.leave ()V\n" +
+            "ARETURN\n" +
+            "MAXSTACK = 3\n" +
+            "\n" +
+            "// access flags 0xA\n" +
+            "private static $btrace$traces$onmethod$ArgsReturnProxy$next(Ljava/lang/Object;)V\n" +
+            "@Lcom/sun/btrace/annotations/MethodRef;()\n" +
+            "@Lcom/sun/btrace/annotations/Return;() // parameter 0\n" +
+            "ALOAD 0\n" +
+            "INVOKESTATIC com/sun/btrace/BTraceUtils.str (Ljava/lang/Object;)Ljava/lang/String;\n" +
+            "INVOKESTATIC com/sun/btrace/BTraceUtils.println (Ljava/lang/Object;)V\n" +
+            "RETURN\n" +
+            "MAXSTACK = 1\n" +
+            "MAXLOCALS = 1"
+        );
+    }
+
+    @Test
     public void methodEntryArgsReturnSampled() throws Exception {
         loadTargetClass("OnMethodTest");
         transform("onmethod/ArgsReturnSampled");
@@ -1103,6 +1154,46 @@ public class InstrumentorTest extends InstrumentorTestBase {
 
         checkTransformation("ALOAD 0\nINVOKESTATIC resources/OnMethodTest.$btrace$traces$onmethod$NoArgsEntryReturn$argsEmptyEntry (Ljava/lang/Object;)V\n"
                 + "ALOAD 0\nINVOKESTATIC resources/OnMethodTest.$btrace$traces$onmethod$NoArgsEntryReturn$argsEmptyReturn (Ljava/lang/Object;)V");
+    }
+
+    @Test
+    public void methodEntryWrapReturn() throws Exception {
+        loadTargetClass("OnMethodTest");
+        transform("onmethod/ArgsReturnWrapper", true);
+
+        checkTransformation(
+            "ASTORE 2\n" +
+            "ALOAD 0\n" +
+            "ALOAD 2\n" +
+            "ALOAD 1\n" +
+            "INVOKESTATIC resources/OnMethodTest.$btrace$traces$onmethod$ArgsReturnWrapper$args (Ljava/lang/Object;Ljava/util/Iterator;Ljava/lang/String;)Ljava/util/Iterator;\n" +
+            "MAXLOCALS = 3\n" +
+            "\n" +
+            "// access flags 0xA\n" +
+            "// signature (Ljava/lang/Object;Ljava/util/Iterator<Ljava/lang/String;>;Ljava/lang/String;)Ljava/util/Iterator<Ljava/lang/String;>;\n" +
+            "// declaration: java.util.Iterator<java.lang.String> $btrace$traces$onmethod$ArgsReturnWrapper$args(java.lang.Object, java.util.Iterator<java.lang.String>, java.lang.String)\n" +
+            "private static $btrace$traces$onmethod$ArgsReturnWrapper$args(Ljava/lang/Object;Ljava/util/Iterator;Ljava/lang/String;)Ljava/util/Iterator;\n" +
+            "@Lcom/sun/btrace/annotations/OnMethod;(clazz=\"/.*\\\\.OnMethodTest/\", method=\"returnWrapper\", location=@Lcom/sun/btrace/annotations/Location;(value=Lcom/sun/btrace/annotations/Kind;.RETURN))\n" +
+            "@Lcom/sun/btrace/annotations/Self;() // parameter 0\n" +
+            "@Lcom/sun/btrace/annotations/Return;() // parameter 1\n" +
+            "TRYCATCHBLOCK L0 L1 L1 java/lang/Throwable\n" +
+            "GETSTATIC traces/onmethod/ArgsReturnWrapper.runtime : Lcom/sun/btrace/BTraceRuntime;\n" +
+            "INVOKESTATIC com/sun/btrace/BTraceRuntime.enter (Lcom/sun/btrace/BTraceRuntime;)Z\n" +
+            "IFNE L0\n" +
+            "ALOAD 1\n" +
+            "ARETURN\n" +
+            "L0\n" +
+            "ALOAD 1\n" +
+            "INVOKESTATIC com/sun/btrace/BTraceRuntime.leave ()V\n" +
+            "ARETURN\n" +
+            "L1\n" +
+            "INVOKESTATIC com/sun/btrace/BTraceRuntime.handleException (Ljava/lang/Throwable;)V\n" +
+            "ALOAD 1\n" +
+            "INVOKESTATIC com/sun/btrace/BTraceRuntime.leave ()V\n" +
+            "ARETURN\n" +
+            "MAXSTACK = 1\n" +
+            "MAXLOCALS = 3"
+        );
     }
 
     @Test

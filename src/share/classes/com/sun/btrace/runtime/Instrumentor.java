@@ -25,6 +25,7 @@
 
 package com.sun.btrace.runtime;
 
+import com.sun.btrace.BTraceRuntime;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Set;
@@ -74,8 +75,8 @@ public class Instrumentor extends ClassVisitor {
         this.btraceClassName = btraceClassName.replace('.', '/');
         this.btraceClass = btraceClass;
         this.onMethods = onMethods;
-        this.applicableOnMethods = new ArrayList<OnMethod>();
-        this.calledOnMethods = new HashSet<OnMethod>();
+        this.applicableOnMethods = new ArrayList<>();
+        this.calledOnMethods = new HashSet<>();
     }
 
     public Instrumentor(Class clazz,
@@ -88,6 +89,7 @@ public class Instrumentor extends ClassVisitor {
         return !calledOnMethods.isEmpty();
     }
 
+    @Override
     public void visit(int version, int access, String name,
         String signature, String superName, String[] interfaces) {
         className = name;
@@ -135,6 +137,7 @@ public class Instrumentor extends ClassVisitor {
         super.visit(version, access, name, signature, superName, interfaces);
     }
 
+    @Override
     public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
         AnnotationVisitor av = super.visitAnnotation(desc, visible);
         String extName = Type.getType(desc).getClassName();
@@ -162,6 +165,7 @@ public class Instrumentor extends ClassVisitor {
         return av;
     }
 
+    @Override
     public MethodVisitor visitMethod(final int access, final String name,
         final String desc, String signature, String[] exceptions) {
         MethodVisitor methodVisitor = super.visitMethod(access, name, desc,
@@ -209,6 +213,7 @@ public class Instrumentor extends ClassVisitor {
         }
 
         return new MethodVisitor(Opcodes.ASM5, (MethodVisitor)visitor) {
+            @Override
             public AnnotationVisitor visitAnnotation(String annoDesc,
                                   boolean visible) {
                 LocalVariableHelper visitor = (LocalVariableHelper)mv;
@@ -409,6 +414,7 @@ public class Instrumentor extends ClassVisitor {
                         actionArgs[actionArgTypes.length + 4] = constArg(om.getMethodParameter(), getName(om.isMethodFqn()));
                         actionArgs[actionArgTypes.length + 5] = localVarArg(om.getSelfParameter(), Type.getObjectType(className), 0);
                         actionArgs[actionArgTypes.length + 6] = new ArgumentProvider(asm, om.getDurationParameter()) {
+                            @Override
                             public void doProvide() {
                                 MethodTrackingExpander.DURATION.insert(mv);
                             }
@@ -746,6 +752,7 @@ public class Instrumentor extends ClassVisitor {
                             actionArgs[2] = constArg(om.getMethodParameter(), getName(om.isMethodFqn()));
                             actionArgs[3] = localVarArg(om.getSelfParameter(), Type.getObjectType(className), 0);
                             actionArgs[4] = new ArgumentProvider(asm, om.getDurationParameter()) {
+                                @Override
                                 public void doProvide() {
                                     MethodTrackingExpander.DURATION.insert(mv);
                                 }
@@ -795,8 +802,6 @@ public class Instrumentor extends ClassVisitor {
                     }
                 };
                 return eri;
-//                }
-            // </editor-fold>//                }
             // </editor-fold>
 
             case FIELD_GET:
@@ -804,8 +809,8 @@ public class Instrumentor extends ClassVisitor {
                 return new FieldAccessInstrumentor(mv, className, superName, access, name, desc) {
 
                     int calledInstanceIndex = -1;
-                    private String targetClassName = loc.getClazz();
-                    private String targetFieldName = (om.isTargetMethodOrFieldFqn() ? targetClassName + "." : "") + loc.getField();
+                    private final String targetClassName = loc.getClazz();
+                    private final String targetFieldName = (om.isTargetMethodOrFieldFqn() ? targetClassName + "." : "") + loc.getField();
 
                     @Override
                     protected void onBeforeGetField(int opcode, String owner,
@@ -879,8 +884,8 @@ public class Instrumentor extends ClassVisitor {
             case FIELD_SET:
                 // <editor-fold defaultstate="collapsed" desc="Field Set Instrumentor">
                 return new FieldAccessInstrumentor(mv, className, superName, access, name, desc) {
-                    private String targetClassName = loc.getClazz();
-                    private String targetFieldName = (om.isTargetMethodOrFieldFqn() ? targetClassName + "." : "") + loc.getField();
+                    private final String targetClassName = loc.getClazz();
+                    private final String targetFieldName = (om.isTargetMethodOrFieldFqn() ? targetClassName + "." : "") + loc.getField();
                     private int calledInstanceIndex = -1;
                     private int fldValueIndex = -1;
 
@@ -1188,7 +1193,9 @@ public class Instrumentor extends ClassVisitor {
 
                         try {
                             if (om.getReturnParameter() != -1) {
-                                asm.dupReturnValue(retOpCode);
+                                if (Type.getReturnType(om.getTargetDescriptor()) == Type.VOID_TYPE) {
+                                    asm.dupReturnValue(retOpCode);
+                                }
                                 retValIndex = storeNewLocal(getReturnType());
                             }
 
@@ -1210,6 +1217,7 @@ public class Instrumentor extends ClassVisitor {
                             actionArgs[actionArgTypes.length + 2] = localVarArg(om.getReturnParameter(), getReturnType(), retValIndex);
                             actionArgs[actionArgTypes.length + 3] = localVarArg(om.getSelfParameter(), Type.getObjectType(className), 0);
                             actionArgs[actionArgTypes.length + 4] = new ArgumentProvider(asm, om.getDurationParameter()) {
+                                @Override
                                 public void doProvide() {
                                     MethodTrackingExpander.DURATION.insert(mv);
                                 }
@@ -1274,7 +1282,7 @@ public class Instrumentor extends ClassVisitor {
                     }
                 };
                 return mri;
-                // </editor-fold>                // </editor-fold>
+                // </editor-fold>
 
             case SYNC_ENTRY:
                 // <editor-fold defaultstate="collapsed" desc="SyncEntry Instrumentor">
@@ -1406,16 +1414,35 @@ public class Instrumentor extends ClassVisitor {
         return mv;
     }
 
+    @Override
     public void visitEnd() {
         int size = applicableOnMethods.size();
-        List<MethodCopier.MethodInfo> mi = new ArrayList<MethodCopier.MethodInfo>(size);
+        List<MethodCopier.MethodInfo> mi = new ArrayList<>(size);
+//        btraceClass.accept(new ClassVisitor(Opcodes.ASM5) {
+//            @Override
+//            public void visit(int version, int access, String name, String sig, String superName, String[] interfaces) {
+//                super.visit(version, access, name, sig, superName, interfaces);
+//            }
+//
+//            @Override
+//            public MethodVisitor visitMethod(int access, String name, String desc, String sig, String[] exceptions) {
+//                MethodVisitor mv = super.visitMethod(access, name, desc, sig, exceptions);
+//                return new MethodVisitor(Opcodes.ASM5, mv) {
+//                    @Override
+//                    public void visitMethodInsn(int opcode, String owner, String name, String desc, boolean iface) {
+//                        super.visitMethodInsn(opcode, owner, name, desc, iface);
+//                    }
+//
+//                };
+//            }
+//        }, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
         for (OnMethod om : calledOnMethods) {
             mi.add(new MethodCopier.MethodInfo(om.getTargetName(),
                      om.getTargetDescriptor(),
-                     getActionMethodName(om.getTargetName()),
+                     getInjectedMethodName(om.getTargetName()),
                      ACC_STATIC | ACC_PRIVATE));
         }
-        MethodCopier copier = new MethodCopier(btraceClass, cv, mi) {
+        MethodCopier copier = new MethodCopier(btraceClass, cv, btraceClassName, className, mi) {
             @Override
             protected MethodVisitor addMethod(int access, String name, String desc,
                         String signature, String[] exceptions) {
@@ -1459,13 +1486,12 @@ public class Instrumentor extends ClassVisitor {
         fos.write(writer.toByteArray());
     }
 
-    private String getActionMethodName(String name) {
-        return Constants.BTRACE_METHOD_PREFIX +
-               btraceClassName.replace('/', '$') + "$" + name;
+    private String getInjectedMethodName(String name) {
+        return BTraceRuntime.getInjectedMethodName(btraceClassName, name);
     }
 
     private void invokeBTraceAction(Assembler asm, OnMethod om) {
-        asm.invokeStatic(className, getActionMethodName(om.getTargetName()),
+        asm.invokeStatic(className, getInjectedMethodName(om.getTargetName()),
             om.getTargetDescriptor().replace(ANYTYPE_DESC, OBJECT_DESC));
         calledOnMethods.add(om);
     }

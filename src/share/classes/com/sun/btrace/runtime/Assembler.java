@@ -33,7 +33,7 @@ import com.sun.btrace.org.objectweb.asm.Type;
 
 /**
  * Convenient fluent wrapper over the ASM method visitor
- * 
+ *
  * @author Jaroslav Bachorik
  */
 final public class Assembler {
@@ -130,6 +130,11 @@ final public class Assembler {
 
     public Assembler loadStaticField(Type owner, String name, Type t) {
         mv.visitFieldInsn(Opcodes.GETSTATIC, owner.getInternalName(), name, t.getDescriptor());
+        return this;
+    }
+
+    public Assembler cast(Type t) {
+        mv.visitTypeInsn(Opcodes.CHECKCAST, t.getInternalName());
         return this;
     }
 

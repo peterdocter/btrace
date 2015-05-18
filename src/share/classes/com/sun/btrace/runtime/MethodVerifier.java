@@ -24,6 +24,7 @@
  */
 package com.sun.btrace.runtime;
 
+import com.sun.btrace.annotations.Return;
 import com.sun.btrace.annotations.Sampled;
 import com.sun.btrace.org.objectweb.asm.AnnotationVisitor;
 import java.util.Map;
@@ -51,8 +52,8 @@ final public class MethodVerifier extends StackTrackingMethodVisitor {
     final private static Set<String> unboxMethods;
 
     static {
-        primitiveWrapperTypes = new HashSet<String>();
-        unboxMethods = new HashSet<String>();
+        primitiveWrapperTypes = new HashSet<>();
+        unboxMethods = new HashSet<>();
 
         primitiveWrapperTypes.add("java/lang/Boolean");
         primitiveWrapperTypes.add("java/lang/Byte");
@@ -84,6 +85,8 @@ final public class MethodVerifier extends StackTrackingMethodVisitor {
     private final int access;
     private final Map<Label, Label> labels;
 
+    private boolean hasReturnVal = false;
+
     private Object delayedClzLoad = null;
 
     public MethodVerifier(Verifier v, BTraceConfigurator cfg, int access, String className, String methodName, String desc) {
@@ -94,7 +97,7 @@ final public class MethodVerifier extends StackTrackingMethodVisitor {
         this.methodName = methodName;
         this.methodDesc = desc;
         this.access = access;
-        labels = new HashMap<Label, Label>();
+        labels = new HashMap<>();
     }
 
     @Override
@@ -102,11 +105,20 @@ final public class MethodVerifier extends StackTrackingMethodVisitor {
                                   boolean visible) {
         AnnotationVisitor av = super.visitAnnotation(desc, visible);
 
-        if (desc.startsWith("Lcom/sun/btrace/annotations/")) {
+        if (desc.startsWith("Lcom/sun/btrace/annotations/") &&
+            !desc.endsWith("/MethodRef;")) {
             asBTrace = true;
         }
 
         return av;
+    }
+
+    @Override
+    public AnnotationVisitor visitParameterAnnotation(int param, String desc, boolean visible) {
+        if (desc.equals(Type.getDescriptor(Return.class))) {
+            hasReturnVal = true;
+        }
+        return super.visitParameterAnnotation(param, desc, visible);
     }
 
     @Override
@@ -115,7 +127,8 @@ final public class MethodVerifier extends StackTrackingMethodVisitor {
             if ((access & ACC_PUBLIC) == 0 && !methodName.equals(CLASS_INITIALIZER)) {
                 reportError("method.should.be.public", methodName + methodDesc);
             }
-            if (Type.getReturnType(methodDesc) != Type.VOID_TYPE) {
+            // a handler with @Return parameter may return a wrapped value
+            if (!hasReturnVal && Type.getReturnType(methodDesc) != Type.VOID_TYPE) {
                 reportError("return.type.should.be.void", methodName + methodDesc);
             }
 
@@ -229,6 +242,9 @@ final public class MethodVerifier extends StackTrackingMethodVisitor {
                 break;
             case INVOKESTATIC:
                 if (owner.equals(SERVICE)) {
+                    delayedClzLoad = null;
+                } else if (owner.equals(BTRACE_UTILS) && name.equals("proxy")) {
+                    // special treatment for "BTraceUtils.proxy"
                     delayedClzLoad = null;
                 } else if (!owner.equals(BTRACE_UTILS) &&
                     !owner.startsWith(BTRACE_UTILS + "$") &&

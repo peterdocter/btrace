@@ -52,6 +52,7 @@ import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
+import sun.reflect.CallerSensitive;
 
 /**
  * This class is an all-in-one wrapper for BTrace DSL methods
@@ -3229,6 +3230,11 @@ public class BTraceUtils {
     	Aggregations.printAggregation(name, aggregation, format);
     }
 
+    @CallerSensitive
+    public static <T> T proxy(T instance, String dispatch, Class<? super T> type) {
+        System.err.println("*** >> " + dispatch);
+        return BTraceRuntime.proxy(type, Reflection.getCallerClass(), instance, dispatch);
+    }
     /********** Namespaced methods ******************/
 
     /*

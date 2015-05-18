@@ -48,6 +48,8 @@ import static com.sun.btrace.runtime.Constants.CLASS_INITIALIZER;
 public class MethodCopier extends ClassVisitor {
     private final ClassReader fromClass;
     private final Iterable<MethodInfo> methods;
+    private final String className;
+    private final String btraceClassName;
 
     public static class MethodInfo {
         String name;
@@ -63,18 +65,34 @@ public class MethodCopier extends ClassVisitor {
             this.newAccess = newAccess;
         }
     }
- 
-    public MethodCopier(ClassReader fromClass, ClassVisitor toClass, 
-                       Iterable<MethodInfo> methods) {
+
+    public MethodCopier(ClassReader fromClass, ClassVisitor toClass, String btraceClassName, String className, Iterable<MethodInfo> methods) {
         super(Opcodes.ASM5, toClass);
         this.fromClass = fromClass;
         this.methods = methods;
+        this.className = className;
+        this.btraceClassName = btraceClassName;
     }
 
     protected MethodVisitor addMethod(int access, String name, String desc,
                         String signature, String[] exceptions) {
-        return super.visitMethod(access, name, desc, 
-                signature, exceptions);
+        return new MethodVisitor(Opcodes.ASM5,
+                                 super.visitMethod(access, name,
+                                                   desc, signature, exceptions
+                                 )
+        ) {
+
+            @Override
+            public void visitMethodInsn(int opcode, String owner, String name, String desc, boolean iface) {
+                System.err.println("*** > " + owner + " > " + name);
+                if (opcode == Opcodes.INVOKESTATIC &&
+                    owner.equals(btraceClassName)) {
+                    owner = className;
+                    name = BTraceRuntime.getInjectedMethodName(btraceClassName, name);
+                }
+                super.visitMethodInsn(opcode, owner, name, desc, iface);
+            }
+        };
     }
 
     private MethodInfo getMethodInfo(String name, String desc) {
@@ -130,6 +148,14 @@ public class MethodCopier extends ClassVisitor {
                     return addMethod(mi.newAccess, mi.newName, desc,
                                        signature, exceptions);
                 } else {
+                    if ((access & Opcodes.ACC_STATIC) != 0 &&
+                        !name.equals("<clinit>")) {
+                        return addMethod(
+                            Opcodes.ACC_STATIC | Opcodes.ACC_PRIVATE,
+                            BTraceRuntime.getInjectedMethodName(btraceClassName, name),
+                            desc, signature, exceptions
+                        );
+                    }
                     return null;
                 }
             }
@@ -172,7 +198,7 @@ public class MethodCopier extends ClassVisitor {
         ClassReader reader2 = new ClassReader(new BufferedInputStream(fis2));
         FileOutputStream fos = new FileOutputStream(args[1] + ".class");
         ClassWriter writer = InstrumentUtils.newClassWriter();
-        MethodCopier copier = new MethodCopier(reader1, writer, miList);
+        MethodCopier copier = new MethodCopier(reader1, writer, args[0], args[1], miList);
         InstrumentUtils.accept(reader2, copier);
         fos.write(writer.toByteArray());
     }

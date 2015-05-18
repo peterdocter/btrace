@@ -43,6 +43,7 @@ import com.sun.btrace.annotations.Kind;
 import com.sun.btrace.annotations.Where;
 import com.sun.btrace.comm.RetransformClassNotification;
 import com.sun.btrace.comm.RetransformationStartNotification;
+import com.sun.btrace.org.objectweb.asm.MethodVisitor;
 import com.sun.btrace.org.objectweb.asm.Opcodes;
 import com.sun.btrace.runtime.ClassFilter;
 import com.sun.btrace.runtime.ClassRenamer;
@@ -155,6 +156,27 @@ abstract class Client implements ClassFileTransformer, CommandListener {
                 }
             }
             if (isBTraceClass(cname) || isSensitiveClass(cname)) {
+//                if (cname.endsWith("/BTraceRuntime$ProxyInvocationHandler")) {
+//                    ClassReader cr = new ClassReader(classfileBuffer);
+//                    ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES);
+//                    ClassVisitor cv = new ClassVisitor(Opcodes.ASM5, cw) {
+//                        @Override
+//                        public MethodVisitor visitMethod(int access, String name, String desc, String sig, String[] exceptions) {
+//                            return new MethodVisitor(Opcodes.ASM5, super.visitMethod(access, name, desc, sig, exceptions)) {
+//                                @Override
+//                                public void visitMethodInsn(int opcode, String owner, String name, String desc, boolean iface) {
+//                                    if (owner.endsWith("/BTraceRuntime$ProxyInvocationHandler") &&
+//                                        name.equals("$invokeStatic")) {
+//                                        visitMethodInsn(Opcodes.INVOKESTATIC, owner, name, desc, iface);
+//                                    }
+//                                    super.visitMethodInsn(opcode, owner, name, desc, iface);
+//                                }
+//                            };
+//                        }
+//                    };
+//                    cr.accept(cv, 0);
+//                    return cw.toByteArray();
+//                }
                 if (debug) Main.debugPrint("skipping transform for BTrace class " + cname); // NOI18N
                 return null;
             }

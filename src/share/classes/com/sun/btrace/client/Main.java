@@ -78,6 +78,8 @@ public final class Main {
     public static void main(String[] args) {
         int port = BTRACE_DEFAULT_PORT;
         String classPath = ".";
+        String sysClassPath = null;
+        String bootClassPath = null;
         String includePath = null;
 
         int count = 0;
@@ -131,6 +133,12 @@ public final class Main {
                     classPath = args[++count];
                     if (isDebug()) debugPrint("accepting classpath " + classPath);
                     classpathDefined = true;
+                } else if (args[count].equals("-scp")) {
+                    sysClassPath = args[++count];
+                    if (isDebug()) debugPrint("accepting system classpath extension:" + sysClassPath);
+                } else if (args[count].equals("-bcp")) {
+                    bootClassPath = args[++count];
+                    if (isDebug()) debugPrint("accepting boot classpath extension:" + bootClassPath);
                 } else if (args[count].equals("-I") && !includePathDefined) {
                     includePath = args[++count];
                     if (isDebug()) debugPrint("accepting include path " + includePath);
@@ -164,6 +172,11 @@ public final class Main {
         }
 
         String pid = args[count];
+        try {
+            Long.parseLong(pid);
+        } catch (NumberFormatException e) {
+            errorExit("Invalid PID: " + pid, 1);
+        }
         String fileName = args[count + 1];
         String[] btraceArgs = new String[args.length - count];
         if (btraceArgs.length > 0) {
@@ -180,7 +193,7 @@ public final class Main {
             if (code == null) {
                 errorExit("BTrace compilation failed", 1);
             }
-            client.attach(pid);
+            client.attach(pid, sysClassPath, bootClassPath);
             registerExitHook(client);
             if (con != null) {
                 registerSignalHandler(client);

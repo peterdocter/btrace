@@ -133,4 +133,8 @@ public class OnMethodTest {
             return -1L;
         }
     }
+
+    public java.util.Iterator<String> returnWrapper(String a) {
+        return java.util.Arrays.asList(a).iterator();
+    }
 }
